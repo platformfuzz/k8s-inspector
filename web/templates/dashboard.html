@@ -1,0 +1,279 @@
+{{define "dashboard-title"}}Dashboard{{end}}
+
+{{define "dashboard-head"}}
+<style>
+  .status-indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+  }
+
+  .status-healthy {
+    background-color: #28a745;
+  }
+
+  .status-warning {
+    background-color: #ffc107;
+  }
+
+  .status-error {
+    background-color: #dc3545;
+  }
+
+  .status-unknown {
+    background-color: #6c757d;
+  }
+</style>
+{{end}}
+
+{{define "dashboard-content"}}
+<div class="dashboard-container">
+  <div class="dashboard-header">
+    <h2>Pod Dashboard</h2>
+    {{if .Data}}
+    <div class="status-badge status-{{.Data.Status.Overall}}">
+      <span class="status-indicator status-{{.Data.Status.Overall}}"></span>
+      {{.Data.Status.Overall}}
+    </div>
+    {{else}}
+    <div class="status-badge status-unknown">
+      <span class="status-indicator status-unknown"></span>
+      unknown
+    </div>
+    {{end}}
+  </div>
+
+  <div class="dashboard-grid">
+    <!-- Pod Information Card -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Pod Information</h3>
+      </div>
+      <div class="card-body">
+        {{if .Data}}{{if .Data.PodInfo}}
+        <div class="info-row">
+          <span class="info-label">Name:</span>
+          <span class="info-value">{{.Data.PodInfo.Name}}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Namespace:</span>
+          <span class="info-value">{{.Data.PodInfo.Namespace}}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Phase:</span>
+          <span class="info-value">{{.Data.PodInfo.Phase}}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">IP:</span>
+          <span class="info-value">{{.Data.PodInfo.IP}}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Node:</span>
+          <span class="info-value">{{.Data.PodInfo.NodeName}}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">In Cluster:</span>
+          <span class="info-value">{{.Data.PodInfo.InCluster}}</span>
+        </div>
+        {{else}}
+        <p>Pod information not available</p>
+        {{end}}{{else}}
+        <p>Dashboard data not available</p>
+        {{end}}
+      </div>
+    </div>
+
+    <!-- Status Card -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Status</h3>
+      </div>
+      <div class="card-body">
+        {{if .Data}}
+        <div class="status-message">{{.Data.Status.Message}}</div>
+        <div class="indicators">
+          {{range $key, $value := .Data.Status.Indicators}}
+          <div class="indicator-item">
+            <span class="status-indicator status-{{$value}}"></span>
+            <span class="indicator-label">{{$key}}:</span>
+            <span class="indicator-value">{{$value}}</span>
+          </div>
+          {{end}}
+        </div>
+        {{else}}
+        <p>Status information not available</p>
+        {{end}}
+      </div>
+    </div>
+
+    <!-- Containers Card -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Containers</h3>
+      </div>
+      <div class="card-body">
+        {{if .Data}}{{if .Data.PodInfo}}{{range .Data.PodInfo.Containers}}
+        <div class="container-item">
+          <div class="container-header">
+            <strong>{{.Name}}</strong>
+            <span class="status-indicator {{if .Ready}}status-healthy{{else}}status-warning{{end}}"></span>
+          </div>
+          <div class="container-details">
+            <div>Image: {{.Image}}</div>
+            <div>Restarts: {{.RestartCount}}</div>
+            {{if .State.Running}}
+            <div>Running since: {{.State.Running.StartedAt.Format "2006-01-02 15:04:05"}}</div>
+            {{end}}
+          </div>
+        </div>
+        {{end}}{{else}}
+        <p>No containers available</p>
+        {{end}}{{else}}
+        <p>Container information not available</p>
+        {{end}}
+      </div>
+    </div>
+
+    <!-- Metrics Card -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Metrics</h3>
+      </div>
+      <div class="card-body">
+        {{if .Data}}{{if .Data.Metrics}}
+        <div class="info-row">
+          <span class="info-label">CPU:</span>
+          <span class="info-value">{{.Data.Metrics.CPU}}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Memory:</span>
+          <span class="info-value">{{.Data.Metrics.Memory}}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Pods:</span>
+          <span class="info-value">{{.Data.Metrics.Pods}}</span>
+        </div>
+        {{else}}
+        <p>Metrics not available (standalone mode)</p>
+        {{end}}{{else}}
+        <p>Metrics information not available</p>
+        {{end}}
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-footer">
+    <p>Auto-refresh: <span id="refresh-status">Connected</span> | Interval: {{.RefreshInterval}}s</p>
+  </div>
+</div>
+{{end}}
+
+{{define "dashboard-scripts"}}
+<script>
+  // Initialize WebSocket connection for real-time updates
+  const refreshInterval = parseInt('{{.RefreshInterval}}', 10) || 5;
+  let ws = null;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 5;
+
+  function connectWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = function () {
+      console.log('WebSocket connected');
+      reconnectAttempts = 0;
+      document.getElementById('refresh-status').textContent = 'Connected';
+      document.getElementById('refresh-status').style.color = '#28a745';
+    };
+
+    ws.onmessage = function (event) {
+      const data = JSON.parse(event.data);
+      updateDashboard(data);
+    };
+
+    ws.onerror = function (error) {
+      console.error('WebSocket error:', error);
+      document.getElementById('refresh-status').textContent = 'Error';
+      document.getElementById('refresh-status').style.color = '#dc3545';
+    };
+
+    ws.onclose = function () {
+      console.log('WebSocket disconnected');
+      document.getElementById('refresh-status').textContent = 'Disconnected';
+      document.getElementById('refresh-status').style.color = '#ffc107';
+
+      // Attempt to reconnect
+      if (reconnectAttempts < maxReconnectAttempts) {
+        reconnectAttempts++;
+        setTimeout(connectWebSocket, 2000 * reconnectAttempts);
+      }
+    };
+  }
+
+  function updateDashboard(data) {
+    // Update pod information
+    if (data.podInfo) {
+      // Update status indicators
+      if (data.status) {
+        const statusBadge = document.querySelector('.status-badge');
+        if (statusBadge) {
+          statusBadge.className = `status-badge status-${data.status.overall}`;
+        }
+      }
+    }
+  }
+
+  // Connect on page load
+  window.addEventListener('load', connectWebSocket);
+
+  // Cleanup on page unload
+  window.addEventListener('beforeunload', function () {
+    if (ws) {
+      ws.close();
+    }
+  });
+</script>
+{{end}}
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.Title}} - {{template "dashboard-title" .}}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="alternate icon" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+  {{template "dashboard-head" .}}
+</head>
+
+<body class="theme-{{.Theme}}">
+  <nav class="navbar">
+    <div class="nav-container">
+      <div class="nav-brand">
+        <h1>{{.Title}}</h1>
+        <span class="version">v{{.Version}}</span>
+      </div>
+      <div class="nav-links">
+        <a href="/dashboard" class="nav-link {{if eq .Request.URL.Path "/dashboard"}}active{{end}}">Dashboard</a>
+        <a href="/inspector" class="nav-link {{if eq .Request.URL.Path "/inspector"}}active{{end}}">Inspector</a>
+      </div>
+    </div>
+  </nav>
+  <main class="main-content">
+    {{template "dashboard-content" .}}
+  </main>
+  <footer class="footer">
+    <p>&copy; 2026 Platform Fuzz - k8s-inspector</p>
+  </footer>
+  <script src="/static/js/dashboard.js"></script>
+  {{template "dashboard-scripts" .}}
+</body>
+
+</html>

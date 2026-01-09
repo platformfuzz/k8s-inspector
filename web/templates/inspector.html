@@ -1,0 +1,495 @@
+{{define "inspector-title"}}Inspector{{end}}
+
+{{define "inspector-head"}}
+<style>
+  .inspector-tabs {
+    display: flex;
+    border-bottom: 2px solid #e0e0e0;
+    margin-bottom: 20px;
+  }
+
+  .tab {
+    padding: 12px 24px;
+    cursor: pointer;
+    border: none;
+    background: none;
+    font-size: 16px;
+    color: #666;
+    border-bottom: 3px solid transparent;
+    transition: all 0.3s;
+  }
+
+  .tab:hover {
+    color: #333;
+  }
+
+  .tab.active {
+    color: #007bff;
+    border-bottom-color: #007bff;
+  }
+
+  .tab:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+    color: #999;
+  }
+
+  .tab:disabled:hover {
+    color: #999;
+  }
+
+  .tab-content {
+    display: none;
+  }
+
+  .tab-content.active {
+    display: block;
+  }
+
+  .log-viewer {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 15px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    max-height: 500px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  .log-line {
+    margin: 2px 0;
+  }
+
+  .env-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .env-table th,
+  .env-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #e0e0e0;
+  }
+
+  .env-table th {
+    background-color: #f5f5f5;
+    font-weight: 600;
+  }
+
+  .secret-value {
+    font-family: monospace;
+    background: #f5f5f5;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .toggle-secrets {
+    margin-bottom: 15px;
+  }
+</style>
+{{end}}
+
+{{define "inspector-content"}}
+<div class="inspector-container">
+  <div class="inspector-header">
+    <h2>Pod Inspector</h2>
+    {{if .Data}}{{if .Data.PodInfo}}
+    <div class="pod-name">{{.Data.PodInfo.Name}}</div>
+    {{else}}
+    <div class="pod-name">Standalone Mode</div>
+    {{end}}{{else}}
+    <div class="pod-name">Standalone Mode</div>
+    {{end}}
+  </div>
+  <div class="inspector-tabs">
+    <button class="tab active" onclick="showTab('info')">Pod Info</button>
+    {{if and .Data .Data.PodInfo .Data.PodInfo.InCluster}}
+    <button class="tab" onclick="showTab('logs')">Logs</button>
+    <button class="tab" onclick="showTab('env')">Environment</button>
+    <button class="tab" onclick="showTab('secrets')">Secrets</button>
+    <button class="tab" onclick="showTab('events')">Events</button>
+    <button class="tab" onclick="showTab('metrics')">Metrics</button>
+    {{else}}
+    <button class="tab" disabled title="Requires Kubernetes cluster connection">Logs</button>
+    <button class="tab" disabled title="Requires Kubernetes cluster connection">Environment</button>
+    <button class="tab" disabled title="Requires Kubernetes cluster connection">Secrets</button>
+    <button class="tab" disabled title="Requires Kubernetes cluster connection">Events</button>
+    <button class="tab" disabled title="Requires Kubernetes cluster connection">Metrics</button>
+    {{end}}
+  </div>
+
+  <!-- Pod Info Tab -->
+  <div id="tab-info" class="tab-content active">
+    <div class="card">
+      <div class="card-header">
+        <h3>Pod Details</h3>
+      </div>
+      <div class="card-body">
+        {{if .Data}}{{if .Data.PodInfo}}
+        {{$podInfo := .Data.PodInfo}}
+        <div class="info-grid">
+          <div class="info-item">
+            <label>Name:</label>
+            <span>{{if $podInfo}}{{$podInfo.Name}}{{else}}N/A{{end}}</span>
+          </div>
+          <div class="info-item">
+            <label>Namespace:</label>
+            <span>{{if $podInfo}}{{$podInfo.Namespace}}{{else}}N/A{{end}}</span>
+          </div>
+          <div class="info-item">
+            <label>UID:</label>
+            <span>{{if $podInfo}}{{$podInfo.UID}}{{else}}N/A{{end}}</span>
+          </div>
+          <div class="info-item">
+            <label>Phase:</label>
+            <span>{{if $podInfo}}{{$podInfo.Phase}}{{else}}N/A{{end}}</span>
+          </div>
+          <div class="info-item">
+            <label>IP:</label>
+            <span>{{if $podInfo}}{{$podInfo.IP}}{{else}}N/A{{end}}</span>
+          </div>
+          <div class="info-item">
+            <label>Host IP:</label>
+            <span>{{if $podInfo}}{{$podInfo.HostIP}}{{else}}N/A{{end}}</span>
+          </div>
+          <div class="info-item">
+            <label>Node:</label>
+            <span>{{if $podInfo}}{{$podInfo.NodeName}}{{else}}N/A{{end}}</span>
+          </div>
+          <div class="info-item">
+            <label>Created:</label>
+            <span>{{if $podInfo}}{{$podInfo.CreationTimestamp}}{{else}}N/A{{end}}</span>
+          </div>
+        </div>
+
+        <h4>Containers</h4>
+        {{if $podInfo}}{{range $podInfo.Containers}}
+        <div class="container-detail">
+          <h5>{{.Name}}</h5>
+          <div class="info-grid">
+            <div class="info-item">
+              <label>Image:</label>
+              <span>{{.Image}}</span>
+            </div>
+            <div class="info-item">
+              <label>Ready:</label>
+              <span>{{.Ready}}</span>
+            </div>
+            <div class="info-item">
+              <label>Restarts:</label>
+              <span>{{.RestartCount}}</span>
+            </div>
+          </div>
+        </div>
+        {{end}}{{end}}
+        {{else}}
+        <p>Pod information not available</p>
+        {{end}}
+        {{else}}
+        <p>Data not available</p>
+        {{end}}
+      </div>
+    </div>
+  </div>
+
+  <!-- Logs Tab -->
+  <div id="tab-logs" class="tab-content">
+    <div class="card">
+      <div class="card-header">
+        <h3>Container Logs</h3>
+      </div>
+      <div class="card-body">
+        <p>Logs are not available in standalone mode. This feature requires a connection to a Kubernetes cluster.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Environment Tab -->
+  <div id="tab-env" class="tab-content">
+    <div class="card">
+      <div class="card-header">
+        <h3>Environment Variables</h3>
+      </div>
+      <div class="card-body">
+        {{if .Data}}
+        {{if .Data.EnvVars}}
+        {{if gt (len .Data.EnvVars) 0}}
+        <table class="env-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range $key, $value := .Data.EnvVars}}
+            <tr>
+              <td><code>{{$key}}</code></td>
+              <td><code>{{$value}}</code></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        {{else}}
+        <p>No environment variables found.</p>
+        {{end}}
+        {{else}}
+        <p>Environment variables are not available in standalone mode. This feature requires a connection to a
+          Kubernetes cluster.</p>
+        {{end}}
+        {{else}}
+        <p>Data not available</p>
+        {{end}}
+      </div>
+    </div>
+  </div>
+
+  <!-- Secrets Tab -->
+  <div id="tab-secrets" class="tab-content">
+    <div class="card">
+      <div class="card-header">
+        <h3>Secrets</h3>
+      </div>
+      <div class="card-body">
+        {{if .Data}}
+        {{if .Data.Secrets}}
+        <table class="env-table">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody id="secrets-table">
+            {{range $key, $value := .Data.Secrets}}
+            <tr>
+              <td><code>{{$key}}</code></td>
+              <td><code class="secret-value">{{if $.ShowSecrets}}{{$value}}{{else}}***HIDDEN***{{end}}</code></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        {{else}}
+        <p>Secrets are not available in standalone mode. This feature requires a connection to a Kubernetes cluster.</p>
+        {{end}}
+        {{else}}
+        <p>Data not available</p>
+        {{end}}
+      </div>
+    </div>
+  </div>
+
+  <!-- Events Tab -->
+  <div id="tab-events" class="tab-content">
+    <div class="card">
+      <div class="card-header">
+        <h3>Pod Events</h3>
+      </div>
+      <div class="card-body">
+        <table class="env-table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Reason</th>
+              <th>Message</th>
+              <th>Count</th>
+              <th>Last Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{if .Data}}
+        {{if .Data.Events}}
+        {{range .Data.Events}}
+            <tr>
+              <td>{{.Type}}</td>
+              <td>{{.Reason}}</td>
+              <td>{{.Message}}</td>
+              <td>{{.Count}}</td>
+              <td>{{.LastTime}}</td>
+            </tr>
+            {{end}}
+        {{else}}
+            <tr>
+              <td colspan="5">Events are not available in standalone mode. This feature requires a connection to a
+                Kubernetes cluster.</td>
+            </tr>
+        {{end}}
+            {{else}}
+            <tr>
+              <td colspan="5">Data not available</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Metrics Tab -->
+  <div id="tab-metrics" class="tab-content">
+    <div class="card">
+      <div class="card-header">
+        <h3>Resource Metrics</h3>
+      </div>
+      <div class="card-body">
+        {{if .Data}}
+        {{if .Data.Metrics}}
+        {{$metrics := .Data.Metrics}}
+        <div class="info-grid">
+          <div class="info-item">
+            <label>CPU:</label>
+            <span>{{$metrics.CPU}}</span>
+          </div>
+          <div class="info-item">
+            <label>Memory:</label>
+            <span>{{$metrics.Memory}}</span>
+          </div>
+          <div class="info-item">
+            <label>Pods:</label>
+            <span>{{$metrics.Pods}}</span>
+          </div>
+        </div>
+        {{else}}
+        <p>Metrics are not available in standalone mode. This feature requires a connection to a Kubernetes cluster with
+          metrics-server installed.</p>
+        {{end}}
+        {{else}}
+        <p>Data not available</p>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "inspector-scripts"}}
+<script>
+  function showTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.tab-content').forEach(tab => {
+      tab.classList.remove('active');
+    });
+    document.querySelectorAll('.tab').forEach(btn => {
+      btn.classList.remove('active');
+    });
+
+    // Show selected tab
+    document.getElementById('tab-' + tabName).classList.add('active');
+    event.target.classList.add('active');
+
+    // Load data for specific tabs
+    if (tabName === 'logs') {
+      loadLogs();
+    }
+  }
+
+  function loadLogs() {
+    const container = document.getElementById('container-select').value;
+    const tailLines = document.getElementById('tail-lines').value;
+    const logViewer = document.getElementById('log-viewer');
+
+    logViewer.textContent = 'Loading logs...';
+
+    let url = `/api/v1/pod/logs?tail=${tailLines}`;
+    if (container) {
+      url += `&container=${container}`;
+    }
+
+    fetch(url)
+      .then(response => response.json())
+      .then(data => {
+        if (data.logs) {
+          logViewer.innerHTML = data.logs.map(log =>
+            `<div class="log-line">${escapeHtml(log)}</div>`
+          ).join('');
+          logViewer.scrollTop = logViewer.scrollHeight;
+        } else {
+          logViewer.textContent = 'No logs available';
+        }
+      })
+      .catch(error => {
+        logViewer.textContent = `Error loading logs: ${error.message}`;
+      });
+  }
+
+  function toggleSecrets() {
+    const showSecrets = document.getElementById('show-secrets').checked;
+    const rows = document.querySelectorAll('#secrets-table tr');
+
+    rows.forEach(row => {
+      const valueCell = row.querySelector('td:last-child code');
+      if (valueCell) {
+        if (showSecrets) {
+          // Would need to fetch actual values from API
+          valueCell.textContent = '***HIDDEN***';
+        } else {
+          valueCell.textContent = '***HIDDEN***';
+        }
+      }
+    });
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // Populate container select (if available)
+  window.addEventListener('load', function () {
+    const containerSelect = document.getElementById('container-select');
+    {{if .Data}}{{if .Data.PodInfo}}{{range .Data.PodInfo.Containers}}
+    (function () {
+      const option = document.createElement('option');
+      option.value = '{{.Name}}';
+      option.textContent = '{{.Name}}';
+      if (containerSelect) {
+        containerSelect.appendChild(option);
+      }
+    })();
+    {{end}}{{end}}{{end}}
+  });
+</script>
+{{end}}
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.Title}} - {{template "inspector-title" .}}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="alternate icon" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+  {{template "inspector-head" .}}
+</head>
+
+<body class="theme-{{.Theme}}">
+  <nav class="navbar">
+    <div class="nav-container">
+      <div class="nav-brand">
+        <h1>{{.Title}}</h1>
+        <span class="version">v{{.Version}}</span>
+      </div>
+      <div class="nav-links">
+        <a href="/dashboard" class="nav-link {{if eq .Request.URL.Path "/dashboard"}}active{{end}}">Dashboard</a>
+        <a href="/inspector" class="nav-link {{if eq .Request.URL.Path "/inspector"}}active{{end}}">Inspector</a>
+      </div>
+    </div>
+  </nav>
+  <main class="main-content">
+    {{template "inspector-content" .}}
+  </main>
+  <footer class="footer">
+    <p>&copy; 2026 Platform Fuzz - k8s-inspector</p>
+  </footer>
+  <script src="/static/js/dashboard.js"></script>
+  {{template "inspector-scripts" .}}
+</body>
+
+</html>
