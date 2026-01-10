@@ -187,6 +187,7 @@ All functionality is available via REST API. Base URL: `/api/v1`
 - `GET /api/v1/pod/env` - Environment variables
 - `GET /api/v1/pod/secrets` - Secret values (hidden by default)
 - `GET /api/v1/pod/events` - Recent Kubernetes events
+- `GET /api/v1/diagnostic` - Diagnostic information for troubleshooting
 
 **Examples:**
 
@@ -211,6 +212,9 @@ curl http://localhost:8080/api/v1/pod/events | jq
 
 # Overall status
 curl http://localhost:8080/api/v1/status | jq
+
+# Diagnostic information
+curl http://localhost:8080/api/v1/diagnostic | jq
 ```
 
 **Response Format:**

@@ -144,17 +144,34 @@ func (h *Handlers) PodEnvHandler(c *gin.Context) {
 }
 
 // PodSecretsHandler returns secret values
+// SECURITY: Secrets are hidden by default. Only show if explicitly requested via query parameter AND config allows it.
 func (h *Handlers) PodSecretsHandler(c *gin.Context) {
 	secrets, err := h.inspector.GetSecrets()
 	if err != nil {
+		// Don't expose error details that might leak secret information
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
+			"error": "Failed to retrieve secrets",
 		})
 		return
 	}
 
-	// Hide secret values if not configured to show
-	if !h.config.ShowSecretValues {
+	// SECURITY: Only allow showing secrets if:
+	// 1. Config explicitly allows it (SHOW_SECRET_VALUES=true), OR
+	// 2. Query parameter explicitly requests it (requires user interaction in UI)
+	showParam := c.Query("show")
+	showSecrets := false
+
+	// Only show secrets if BOTH conditions are met:
+	// - Config allows it (server-side control)
+	// - AND user explicitly requests it via query parameter (client-side control)
+	if h.config.ShowSecretValues && showParam == "true" {
+		showSecrets = true
+	} else if showParam == "false" {
+		showSecrets = false
+	}
+
+	// Always hide secret values by default for security
+	if !showSecrets {
 		hiddenSecrets := make(map[string]string)
 		for key := range secrets {
 			hiddenSecrets[key] = "***HIDDEN***"
@@ -162,13 +179,16 @@ func (h *Handlers) PodSecretsHandler(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"secrets": hiddenSecrets,
 			"hidden":  true,
+			"warning": "Secret values are hidden by default for security. Enable SHOW_SECRET_VALUES config and use ?show=true to reveal.",
 		})
 		return
 	}
 
+	// SECURITY WARNING: Only reach here if explicitly enabled
 	c.JSON(http.StatusOK, gin.H{
 		"secrets": secrets,
 		"hidden":  false,
+		"warning": "⚠️ SECURITY WARNING: Secret values are visible. Do not share screenshots or logs containing these values.",
 	})
 }
 
@@ -189,4 +209,35 @@ func (h *Handlers) PodEventsHandler(c *gin.Context) {
 // IndexHandler redirects to dashboard
 func (h *Handlers) IndexHandler(c *gin.Context) {
 	c.Redirect(http.StatusMovedPermanently, "/dashboard")
+}
+
+// DiagnosticHandler returns diagnostic information for debugging
+func (h *Handlers) DiagnosticHandler(c *gin.Context) {
+	diagnostics := gin.H{
+		"config": gin.H{
+			"inCluster": h.config.InCluster,
+			"podName":   h.config.PodName,
+			"namespace": h.config.Namespace,
+		},
+		"k8sClient": gin.H{
+			"available": h.inspector != nil && h.inspector.GetK8sClient() != nil && h.inspector.GetK8sClient().IsAvailable(),
+			"inCluster": h.inspector != nil && h.inspector.GetK8sClient() != nil && h.inspector.GetK8sClient().IsInCluster(),
+		},
+	}
+
+	// Try to get pod info to see what error we get
+	if h.inspector != nil {
+		podInfo, err := h.inspector.GetPodInfo()
+		if err != nil {
+			diagnostics["podInfoError"] = err.Error()
+		} else {
+			diagnostics["podInfo"] = gin.H{
+				"name":      podInfo.Name,
+				"namespace": podInfo.Namespace,
+				"phase":     podInfo.Phase,
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, diagnostics)
 }

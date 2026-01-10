@@ -133,6 +133,11 @@ func NewInspector(k8sClient *k8s.Client) *Inspector {
 	}
 }
 
+// GetK8sClient returns the Kubernetes client (for diagnostics)
+func (i *Inspector) GetK8sClient() *k8s.Client {
+	return i.k8sClient
+}
+
 // GetPodInfo retrieves comprehensive information about the current pod
 func (i *Inspector) GetPodInfo() (*PodInfo, error) {
 	if !i.k8sClient.IsAvailable() {
@@ -162,37 +167,18 @@ func (i *Inspector) GetPodInfo() (*PodInfo, error) {
 		podName = hostname
 	}
 
+	// Try to get pod by name first
 	pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pod: %w", err)
+		// If direct lookup fails, try fallback methods
+		pod, err = i.findPodFallback(i.k8sClient, namespace, podName, err)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get pod %s/%s (may need RBAC permissions or pod name mismatch): %w", namespace, podName, err)
+		}
 	}
 
 	containers := i.buildContainerInfos(pod)
-
-	// Pod conditions
-	conditions := make([]PodCondition, 0, len(pod.Status.Conditions))
-	for _, cond := range pod.Status.Conditions {
-		var lastProbeTime *time.Time
-		if !cond.LastProbeTime.IsZero() {
-			t := cond.LastProbeTime.Time
-			lastProbeTime = &t
-		}
-
-		var lastTransitionTime *time.Time
-		if !cond.LastTransitionTime.IsZero() {
-			t := cond.LastTransitionTime.Time
-			lastTransitionTime = &t
-		}
-
-		conditions = append(conditions, PodCondition{
-			Type:               string(cond.Type),
-			Status:             string(cond.Status),
-			LastProbeTime:      lastProbeTime,
-			LastTransitionTime: lastTransitionTime,
-			Reason:             cond.Reason,
-			Message:            cond.Message,
-		})
-	}
+	conditions := i.buildPodConditions(pod)
 
 	return &PodInfo{
 		Name:              pod.Name,
@@ -304,7 +290,14 @@ func (i *Inspector) GetEnvVars() (map[string]string, error) {
 			if env.Value != "" {
 				envVars[env.Name] = env.Value
 			} else if env.ValueFrom != nil {
-				envVars[env.Name] = i.getEnvVarReference(env.ValueFrom)
+				// Try to resolve the actual value
+				resolvedValue, err := i.resolveEnvVarReference(env.ValueFrom, pod)
+				if err == nil && resolvedValue != "" {
+					envVars[env.Name] = resolvedValue
+				} else {
+					// Fallback to reference description
+					envVars[env.Name] = i.getEnvVarReference(env.ValueFrom)
+				}
 			}
 		}
 	}
@@ -483,6 +476,65 @@ func int64Ptr(i int64) *int64 {
 }
 
 // buildContainerInfos builds container information from pod spec and status
+// findPodFallback attempts to find a pod using fallback methods when direct lookup fails
+func (i *Inspector) findPodFallback(k8sClient *k8s.Client, namespace, podName string, originalErr error) (*corev1.Pod, error) {
+	log.Printf("Failed to get pod %s/%s: %v, attempting fallback", namespace, podName, originalErr)
+
+	// Try to list pods and find one matching hostname
+	hostname, _ := os.Hostname()
+	clientset := k8sClient.GetClientset()
+	pods, listErr := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
+	if listErr != nil || len(pods.Items) == 0 {
+		return nil, originalErr
+	}
+
+	// Try to find pod by hostname or name match
+	for idx := range pods.Items {
+		p := &pods.Items[idx]
+		if p.Spec.Hostname == hostname || p.Name == hostname || strings.HasPrefix(p.Name, hostname) {
+			log.Printf("Found pod %s/%s via fallback (hostname: %s)", p.Namespace, p.Name, hostname)
+			return p, nil
+		}
+	}
+
+	// If no match found but we have pods, use the first one as last resort
+	if len(pods.Items) == 1 {
+		pod := &pods.Items[0]
+		log.Printf("Using first available pod %s/%s as fallback", pod.Namespace, pod.Name)
+		return pod, nil
+	}
+
+	return nil, originalErr
+}
+
+// buildPodConditions converts pod conditions to our format
+func (i *Inspector) buildPodConditions(pod *corev1.Pod) []PodCondition {
+	conditions := make([]PodCondition, 0, len(pod.Status.Conditions))
+	for _, cond := range pod.Status.Conditions {
+		var lastProbeTime *time.Time
+		if !cond.LastProbeTime.IsZero() {
+			t := cond.LastProbeTime.Time
+			lastProbeTime = &t
+		}
+
+		var lastTransitionTime *time.Time
+		if !cond.LastTransitionTime.IsZero() {
+			t := cond.LastTransitionTime.Time
+			lastTransitionTime = &t
+		}
+
+		conditions = append(conditions, PodCondition{
+			Type:               string(cond.Type),
+			Status:             string(cond.Status),
+			LastProbeTime:      lastProbeTime,
+			LastTransitionTime: lastTransitionTime,
+			Reason:             cond.Reason,
+			Message:            cond.Message,
+		})
+	}
+	return conditions
+}
+
 func (i *Inspector) buildContainerInfos(pod *corev1.Pod) []ContainerInfo {
 	containers := make([]ContainerInfo, 0, len(pod.Spec.Containers))
 	for idx, container := range pod.Spec.Containers {
@@ -563,6 +615,95 @@ func (i *Inspector) buildResourceLimits(resources corev1.ResourceRequirements) R
 	return rl
 }
 
+// resolveEnvVarReference attempts to resolve the actual value of an environment variable reference
+func (i *Inspector) resolveEnvVarReference(valueFrom *corev1.EnvVarSource, pod *corev1.Pod) (string, error) {
+	if valueFrom.FieldRef != nil {
+		return i.resolveFieldRef(valueFrom.FieldRef, pod)
+	}
+
+	if valueFrom.SecretKeyRef != nil {
+		return i.resolveSecretKeyRef(valueFrom.SecretKeyRef)
+	}
+
+	if valueFrom.ConfigMapKeyRef != nil {
+		return i.resolveConfigMapKeyRef(valueFrom.ConfigMapKeyRef)
+	}
+
+	return "", fmt.Errorf("unable to resolve reference")
+}
+
+// resolveFieldRef handles downward API field references
+func (i *Inspector) resolveFieldRef(fieldRef *corev1.ObjectFieldSelector, pod *corev1.Pod) (string, error) {
+	switch fieldRef.FieldPath {
+	case "metadata.name":
+		return pod.Name, nil
+	case "metadata.namespace":
+		return pod.Namespace, nil
+	case "metadata.uid":
+		return string(pod.UID), nil
+	case "spec.nodeName":
+		return pod.Spec.NodeName, nil
+	case "status.hostIP":
+		return pod.Status.HostIP, nil
+	case "status.podIP":
+		return pod.Status.PodIP, nil
+	case "status.podIPs":
+		if len(pod.Status.PodIPs) > 0 {
+			return pod.Status.PodIPs[0].IP, nil
+		}
+		return pod.Status.PodIP, nil
+	default:
+		return i.resolveFieldRefFromEnv(fieldRef.FieldPath)
+	}
+}
+
+// resolveFieldRefFromEnv attempts to resolve field ref from environment variables
+func (i *Inspector) resolveFieldRefFromEnv(fieldPath string) (string, error) {
+	if fieldPath == "metadata.name" {
+		if val := os.Getenv("POD_NAME"); val != "" {
+			return val, nil
+		}
+	}
+	if fieldPath == "metadata.namespace" {
+		if val := os.Getenv("POD_NAMESPACE"); val != "" {
+			return val, nil
+		}
+	}
+	return "", fmt.Errorf("unable to resolve field reference: %s", fieldPath)
+}
+
+// resolveSecretKeyRef retrieves a value from a Kubernetes secret
+func (i *Inspector) resolveSecretKeyRef(secretKeyRef *corev1.SecretKeySelector) (string, error) {
+	clientset := i.k8sClient.GetClientset()
+	namespace := i.k8sClient.GetNamespace()
+	secret, err := clientset.CoreV1().Secrets(namespace).Get(context.TODO(), secretKeyRef.Name, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get secret %s: %w", secretKeyRef.Name, err)
+	}
+
+	if val, ok := secret.Data[secretKeyRef.Key]; ok {
+		return string(val), nil
+	}
+
+	return "", fmt.Errorf("key %s not found in secret %s", secretKeyRef.Key, secretKeyRef.Name)
+}
+
+// resolveConfigMapKeyRef retrieves a value from a Kubernetes configmap
+func (i *Inspector) resolveConfigMapKeyRef(configMapKeyRef *corev1.ConfigMapKeySelector) (string, error) {
+	clientset := i.k8sClient.GetClientset()
+	namespace := i.k8sClient.GetNamespace()
+	configMap, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.TODO(), configMapKeyRef.Name, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get configmap %s: %w", configMapKeyRef.Name, err)
+	}
+
+	if val, ok := configMap.Data[configMapKeyRef.Key]; ok {
+		return val, nil
+	}
+
+	return "", fmt.Errorf("key %s not found in configmap %s", configMapKeyRef.Key, configMapKeyRef.Name)
+}
+
 // getEnvVarReference returns a string representation of an environment variable reference
 func (i *Inspector) getEnvVarReference(valueFrom *corev1.EnvVarSource) string {
 	switch {
@@ -570,6 +711,8 @@ func (i *Inspector) getEnvVarReference(valueFrom *corev1.EnvVarSource) string {
 		return fmt.Sprintf("[Secret: %s/%s]", valueFrom.SecretKeyRef.Name, valueFrom.SecretKeyRef.Key)
 	case valueFrom.ConfigMapKeyRef != nil:
 		return fmt.Sprintf("[ConfigMap: %s/%s]", valueFrom.ConfigMapKeyRef.Name, valueFrom.ConfigMapKeyRef.Key)
+	case valueFrom.FieldRef != nil:
+		return fmt.Sprintf("[FieldRef: %s]", valueFrom.FieldRef.FieldPath)
 	default:
 		return "[Reference]"
 	}

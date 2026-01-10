@@ -1,6 +1,8 @@
 package dashboard
 
 import (
+	"log"
+
 	"github.com/platformfuzz/k8s-inspector/internal/inspector"
 )
 
@@ -41,7 +43,21 @@ func NewDashboard(insp *inspector.Inspector) *Dashboard {
 
 // GetData retrieves and aggregates all dashboard data
 func (d *Dashboard) GetData() *DashboardData {
-	podInfo, _ := d.inspector.GetPodInfo()
+	podInfo, err := d.inspector.GetPodInfo()
+	if err != nil {
+		log.Printf("Warning: Failed to get pod info: %v", err)
+		// GetPodInfo() should always return a valid PodInfo (handles standalone mode),
+		// but if it's nil, create a minimal fallback
+		if podInfo == nil {
+			podInfo = &inspector.PodInfo{
+				Name:      "unknown",
+				Namespace: "unknown",
+				Phase:     "Unknown",
+				InCluster: false,
+			}
+		}
+	}
+
 	metrics, _ := d.inspector.GetMetrics()
 
 	status := d.calculateStatus(podInfo)
