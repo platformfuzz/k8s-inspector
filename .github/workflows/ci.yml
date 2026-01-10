@@ -3,14 +3,6 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "LICENSE"
-      - ".gitignore"
-      - ".vscode/**"
-      - ".devcontainer/**"
 
 permissions:
   contents: read
