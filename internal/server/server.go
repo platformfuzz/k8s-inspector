@@ -110,6 +110,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/pod/env", s.handlers.PodEnvHandler)
 		api.GET("/pod/secrets", s.handlers.PodSecretsHandler)
 		api.GET("/pod/events", s.handlers.PodEventsHandler)
+		api.GET("/diagnostic", s.handlers.DiagnosticHandler)
 	}
 
 	// WebSocket endpoint

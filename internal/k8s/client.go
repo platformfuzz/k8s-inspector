@@ -3,6 +3,7 @@ package k8s
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/platformfuzz/k8s-inspector/internal/config"
 	"k8s.io/client-go/kubernetes"
@@ -119,11 +120,27 @@ func getPodInfo(cfg *config.Config, inCluster bool) (string, string) {
 
 // getPodNameFromAPI attempts to get pod name from downward API
 func getPodNameFromAPI() string {
-	if data, err := os.ReadFile("/etc/podinfo/name"); err == nil {
-		return string(data)
+	// Try multiple downward API paths
+	paths := []string{
+		"/etc/podinfo/name",
+		"/var/run/secrets/kubernetes.io/serviceaccount/namespace", // Sometimes pod name is here
 	}
-	// Fallback to hostname
+
+	for _, path := range paths {
+		// gosec G304: path is from a hardcoded list, safe to read
+		// #nosec G304
+		if data, err := os.ReadFile(path); err == nil {
+			name := strings.TrimSpace(string(data))
+			if name != "" {
+				return name
+			}
+		}
+	}
+
+	// Fallback to hostname (in K8s, hostname usually equals pod name)
 	hostname, _ := os.Hostname()
+	// For StatefulSets, pod name might be base-0, but we want the full name
+	// So we keep the full hostname as-is
 	return hostname
 }
 

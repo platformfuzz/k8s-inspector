@@ -203,7 +203,22 @@
         <h3>Container Logs</h3>
       </div>
       <div class="card-body">
+        {{if and .Data .Data.PodInfo .Data.PodInfo.InCluster}}
+        <div style="margin-bottom: 15px;">
+          {{if .Data.PodInfo.Containers}}
+          <label for="container-select" style="margin-right: 10px;">Container:</label>
+          <select id="container-select" style="margin-right: 20px; padding: 5px;">
+            <option value="">All Containers</option>
+          </select>
+          {{end}}
+          <label for="tail-lines" style="margin-right: 10px;">Lines:</label>
+          <input type="number" id="tail-lines" value="100" min="1" max="1000" style="padding: 5px; width: 80px; margin-right: 10px;">
+          <button onclick="loadLogs()" style="padding: 5px 15px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Refresh</button>
+        </div>
+        <div id="log-viewer" class="log-viewer">Click "Refresh" to load logs...</div>
+        {{else}}
         <p>Logs are not available in standalone mode. This feature requires a connection to a Kubernetes cluster.</p>
+        {{end}}
       </div>
     </div>
   </div>
@@ -255,8 +270,21 @@
         <h3>Secrets</h3>
       </div>
       <div class="card-body">
-        {{if .Data}}
+        {{if and .Data .Data.PodInfo .Data.PodInfo.InCluster}}
         {{if .Data.Secrets}}
+        {{if gt (len .Data.Secrets) 0}}
+        <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 12px; margin-bottom: 15px;">
+          <strong>⚠️ Security Warning:</strong> Secret values are hidden by default. Only reveal if necessary and ensure you're in a secure environment.
+        </div>
+        <div class="toggle-secrets">
+          <label>
+            <input type="checkbox" id="show-secrets" onchange="confirmToggleSecrets(this)">
+            <strong>Show secret values</strong> (requires confirmation)
+          </label>
+        </div>
+        <div id="secrets-warning" style="display: none; background: #f8d7da; border: 1px solid #dc3545; border-radius: 4px; padding: 12px; margin: 10px 0;">
+          <strong>⚠️ SECURITY WARNING:</strong> Secret values are now visible. Do not share screenshots, copy to clipboard, or log these values.
+        </div>
         <table class="env-table">
           <thead>
             <tr>
@@ -268,16 +296,19 @@
             {{range $key, $value := .Data.Secrets}}
             <tr>
               <td><code>{{$key}}</code></td>
-              <td><code class="secret-value">{{if $.ShowSecrets}}{{$value}}{{else}}***HIDDEN***{{end}}</code></td>
+              <td><code class="secret-value">***HIDDEN***</code></td>
             </tr>
             {{end}}
           </tbody>
         </table>
         {{else}}
-        <p>Secrets are not available in standalone mode. This feature requires a connection to a Kubernetes cluster.</p>
+        <p>No secrets found. This pod does not reference any secrets.</p>
         {{end}}
         {{else}}
-        <p>Data not available</p>
+        <p>No secrets found. This pod does not reference any secrets.</p>
+        {{end}}
+        {{else}}
+        <p>Secrets are not available in standalone mode. This feature requires a connection to a Kubernetes cluster.</p>
         {{end}}
       </div>
     </div>
@@ -388,9 +419,17 @@
   }
 
   function loadLogs() {
-    const container = document.getElementById('container-select').value;
-    const tailLines = document.getElementById('tail-lines').value;
+    const containerSelect = document.getElementById('container-select');
+    const tailLinesInput = document.getElementById('tail-lines');
     const logViewer = document.getElementById('log-viewer');
+
+    if (!logViewer) {
+      console.error('Log viewer element not found');
+      return;
+    }
+
+    const container = containerSelect ? containerSelect.value : '';
+    const tailLines = tailLinesInput ? tailLinesInput.value : '100';
 
     logViewer.textContent = 'Loading logs...';
 
@@ -416,21 +455,54 @@
       });
   }
 
-  function toggleSecrets() {
-    const showSecrets = document.getElementById('show-secrets').checked;
-    const rows = document.querySelectorAll('#secrets-table tr');
-
-    rows.forEach(row => {
-      const valueCell = row.querySelector('td:last-child code');
-      if (valueCell) {
-        if (showSecrets) {
-          // Would need to fetch actual values from API
-          valueCell.textContent = '***HIDDEN***';
-        } else {
-          valueCell.textContent = '***HIDDEN***';
-        }
+  function confirmToggleSecrets(checkbox) {
+    if (checkbox.checked) {
+      // Require explicit confirmation before showing secrets
+      if (!confirm('⚠️ SECURITY WARNING\n\nShowing secret values may expose sensitive information.\n\nAre you in a secure environment?\nDo you understand the security implications?\n\nClick OK only if you need to view secrets.')) {
+        checkbox.checked = false;
+        return;
       }
-    });
+    }
+
+    toggleSecrets(checkbox.checked);
+  }
+
+  function toggleSecrets(showSecrets) {
+    const showParam = showSecrets ? 'true' : 'false';
+    const warningDiv = document.getElementById('secrets-warning');
+
+    // Show/hide warning
+    if (warningDiv) {
+      warningDiv.style.display = showSecrets ? 'block' : 'none';
+    }
+
+    // Fetch secrets with show parameter
+    fetch(`/api/v1/pod/secrets?show=${showParam}`)
+      .then(response => response.json())
+      .then(data => {
+        if (data.warning) {
+          console.warn(data.warning);
+        }
+
+        if (data.secrets) {
+          const tbody = document.getElementById('secrets-table');
+          if (tbody) {
+            tbody.innerHTML = '';
+            Object.entries(data.secrets).forEach(([key, value]) => {
+              const row = document.createElement('tr');
+              row.innerHTML = `
+                <td><code>${escapeHtml(key)}</code></td>
+                <td><code class="secret-value">${showSecrets ? escapeHtml(value) : '***HIDDEN***'}</code></td>
+              `;
+              tbody.appendChild(row);
+            });
+          }
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching secrets:', error);
+        alert('Failed to load secrets. They remain hidden for security.');
+      });
   }
 
   function escapeHtml(text) {
