@@ -2,7 +2,6 @@ package k8s
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/platformfuzz/k8s-inspector/internal/config"
@@ -64,22 +63,16 @@ func getK8sConfig(cfg *config.Config) (*rest.Config, bool, error) {
 	return getKubeconfig()
 }
 
-// getKubeconfig attempts to load kubeconfig
+// getKubeconfig attempts to load kubeconfig via client-go loading rules.
 func getKubeconfig() (*rest.Config, bool, error) {
-	kubeconfig := os.Getenv("KUBECONFIG")
-	if kubeconfig == "" {
-		home, _ := os.UserHomeDir()
-		kubeconfig = filepath.Join(home, ".kube", "config")
-	}
-
-	if _, err := os.Stat(kubeconfig); err != nil {
-		// No kubeconfig found
-		return nil, false, nil
-	}
-
-	k8sConfig, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	k8sConfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		loadingRules,
+		&clientcmd.ConfigOverrides{},
+	).ClientConfig()
 	if err != nil {
-		return nil, false, err
+		// No usable kubeconfig — standalone mode
+		return nil, false, nil
 	}
 
 	return k8sConfig, false, nil

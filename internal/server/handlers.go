@@ -10,6 +10,11 @@ import (
 	"github.com/platformfuzz/k8s-inspector/internal/inspector"
 )
 
+const (
+	jsonKeyError     = "error"
+	jsonKeyInCluster = "inCluster"
+)
+
 // Handlers contains all HTTP handlers
 type Handlers struct {
 	config    *config.Config
@@ -77,7 +82,7 @@ func (h *Handlers) StatusHandler(c *gin.Context) {
 		"status":  data.Status.Overall,
 		"message": data.Status.Message,
 		"indicators": data.Status.Indicators,
-		"inCluster": data.PodInfo.InCluster,
+		jsonKeyInCluster: data.PodInfo.InCluster,
 	})
 }
 
@@ -86,7 +91,7 @@ func (h *Handlers) PodInfoHandler(c *gin.Context) {
 	podInfo, err := h.inspector.GetPodInfo()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
+			jsonKeyError: err.Error(),
 		})
 		return
 	}
@@ -105,7 +110,7 @@ func (h *Handlers) PodLogsHandler(c *gin.Context) {
 	logs, err := h.inspector.GetLogs(containerName, tailLines)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
+			jsonKeyError: err.Error(),
 		})
 		return
 	}
@@ -122,7 +127,7 @@ func (h *Handlers) PodMetricsHandler(c *gin.Context) {
 	metrics, err := h.inspector.GetMetrics()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
+			jsonKeyError: err.Error(),
 		})
 		return
 	}
@@ -134,7 +139,7 @@ func (h *Handlers) PodEnvHandler(c *gin.Context) {
 	envVars, err := h.inspector.GetEnvVars()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
+			jsonKeyError: err.Error(),
 		})
 		return
 	}
@@ -150,7 +155,7 @@ func (h *Handlers) PodSecretsHandler(c *gin.Context) {
 	if err != nil {
 		// Don't expose error details that might leak secret information
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to retrieve secrets",
+			jsonKeyError: "Failed to retrieve secrets",
 		})
 		return
 	}
@@ -197,7 +202,7 @@ func (h *Handlers) PodEventsHandler(c *gin.Context) {
 	events, err := h.inspector.GetEvents()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
+			jsonKeyError: err.Error(),
 		})
 		return
 	}
@@ -215,13 +220,13 @@ func (h *Handlers) IndexHandler(c *gin.Context) {
 func (h *Handlers) DiagnosticHandler(c *gin.Context) {
 	diagnostics := gin.H{
 		"config": gin.H{
-			"inCluster": h.config.InCluster,
+			jsonKeyInCluster: h.config.InCluster,
 			"podName":   h.config.PodName,
 			"namespace": h.config.Namespace,
 		},
 		"k8sClient": gin.H{
 			"available": h.inspector != nil && h.inspector.GetK8sClient() != nil && h.inspector.GetK8sClient().IsAvailable(),
-			"inCluster": h.inspector != nil && h.inspector.GetK8sClient() != nil && h.inspector.GetK8sClient().IsInCluster(),
+			jsonKeyInCluster: h.inspector != nil && h.inspector.GetK8sClient() != nil && h.inspector.GetK8sClient().IsInCluster(),
 		},
 	}
 
