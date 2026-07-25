@@ -14,6 +14,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const metricUnavailable = "N/A"
+
 // Inspector provides inspection capabilities for Kubernetes pods
 type Inspector struct {
 	k8sClient *k8s.Client
@@ -367,8 +369,8 @@ func (i *Inspector) GetSecrets() (map[string]string, error) {
 func (i *Inspector) GetMetrics() (*Metrics, error) {
 	if !i.k8sClient.IsAvailable() {
 		return &Metrics{
-			CPU:    "N/A",
-			Memory: "N/A",
+			CPU:    metricUnavailable,
+			Memory: metricUnavailable,
 			Pods:   0,
 		}, nil
 	}
@@ -384,8 +386,8 @@ func (i *Inspector) GetMetrics() (*Metrics, error) {
 	}
 
 	return &Metrics{
-		CPU:    "N/A", // Would need metrics-server API
-		Memory: "N/A", // Would need metrics-server API
+		CPU:    metricUnavailable, // Would need metrics-server API
+		Memory: metricUnavailable, // Would need metrics-server API
 		Pods:   len(pods.Items),
 	}, nil
 }
